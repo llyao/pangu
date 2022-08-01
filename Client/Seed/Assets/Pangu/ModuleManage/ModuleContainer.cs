@@ -5,7 +5,13 @@ namespace Pangu.Frame.Core
 {
     public class ModuleContainer
     {
-        private Dictionary<Type, object> _modules = new Dictionary<Type, object>();
+        private Dictionary<Type, Type> _unActivationTypes = new Dictionary<Type, Type>();
+
+        private Dictionary<Type, object> _activationModules = new Dictionary<Type, object>();
+
+        private List<IModuleTick> _ticks = new List<IModuleTick>();
+
+        private List<IModuleLateTick> _lateTicks = new List<IModuleLateTick>();
 
         private static ModuleContainer _instance;
 
@@ -19,55 +25,114 @@ namespace Pangu.Frame.Core
             }
         }
 
-        public ModuleContainer RegisterModule<Module,IModule>() where Module : IModule
+        public ModuleContainer RegisterModule<Module, IModule>(bool loadimm) where Module : IModule
         {
             var type = typeof(IModule);
-            
-            if (!_modules.ContainsKey(type))
+
+            if (HasRegisterModule(type))
             {
-                object obj = Activator.CreateInstance(typeof(Module));
-                RegisterModule<IModule>((IModule)obj);
+                return Instance;
+            }
+            
+            var objType = typeof(Module);
+
+            if (loadimm)
+            {
+                MakeModule(type, objType);
+            }
+            else
+            {
+                _unActivationTypes.Add(type, objType);
             }
 
             return Instance;
         }
 
-        public IMoudle Query<IMoudle>()
+        public IModule Query<IModule>()
         {
+            var itype = typeof(IModule);
+            
             object obj = null;
 
-            if (_modules.TryGetValue(typeof(IMoudle), out obj))
+            if (_activationModules.TryGetValue(itype, out obj))
             {
-                return (IMoudle)obj;
+                return (IModule)obj;
             }
             
-            return default(IMoudle);
+            Type objType = null;
+            
+            if(_unActivationTypes.TryGetValue(itype, out objType))
+            {
+                obj = MakeModule(itype, objType);
+                return (IModule)obj;
+            }
+            
+            return default(IModule);
         }
 
-        public void Tick(float deltaTime)
+        private object MakeModule(Type type, Type objType) 
         {
+            object obj = Activator.CreateInstance(objType);
 
+            if(obj != null)
+            {
+                RegisterObjectModule(type, obj);
+                
+                if(obj is IModuleTick)
+                {
+                    _ticks.Add((IModuleTick)obj);
+                }
+
+                if(obj is IModuleLateTick)
+                {
+                    _lateTicks.Add((IModuleLateTick)obj);
+                }
+            }
+            
+            return obj;
         }
 
-        public void LateTick(float deltaTime)
-        {
-
-        }
-
-        private ModuleContainer RegisterModule<IModule>(object obj)
+        private ModuleContainer RegisterObjectModule(Type type,object obj)
         {
             if (obj == null)
                 return Instance;
 
-            var type = typeof(IModule);
-
-            if (!_modules.ContainsKey(type))
+            if (!_activationModules.ContainsKey(type))
             {
-                _modules.Add(type, obj);
+                _activationModules.Add(type, obj);
             }
 
             return Instance;
         }
+
+        private bool HasRegisterModule(Type type)
+        {
+            if(_activationModules.ContainsKey(type))
+            {
+                return true;
+            }
+            else if(_unActivationTypes.ContainsKey(type))
+            {
+                return true;
+            }
+            return false;
+        }
+        
+        internal void Tick(float deltaTime)
+        {
+            foreach (var t in _ticks)
+            {
+                t.Tick(deltaTime);
+            }
+        }
+
+        internal void LateTick(float deltaTime)
+        {
+            foreach (var t in _lateTicks)
+            {
+                t.LateTick(deltaTime);
+            }
+        }
+
     }
 }
-
